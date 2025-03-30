@@ -1,5 +1,6 @@
-# ## Let's implement CCS from scratch.
-# This will deliberately be a simple (but less efficient) implementation to make everything as clear as possible.
+import torch
+# print(torch.__version__)
+# print(torch.cuda.is_available())
 
 from tqdm import tqdm
 import copy
