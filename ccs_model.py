@@ -5,6 +5,7 @@ import torch
 import copy
 import numpy as np
 from tqdm import tqdm
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
 
 class MLPProbe(nn.Module):
@@ -80,20 +81,36 @@ class CCS(object):
         return informative_loss + consistent_loss
 
 
-    def get_acc(self, x0_test, x1_test, y_test):
+    def get_acc(self, x0_test, x1_test, y_test, return_all_metrics=False):
         """
-        Computes accuracy for the current parameters on the given test inputs
+        Computes accuracy and other metrics for the current parameters on the given test inputs
+        Args:
+            return_all_metrics: if True, returns (acc, precision, recall, f1, auc)
         """
+
         x0 = torch.tensor(self.normalize(x0_test), dtype=torch.float, requires_grad=False, device=self.device)
         x1 = torch.tensor(self.normalize(x1_test), dtype=torch.float, requires_grad=False, device=self.device)
+        
         with torch.no_grad():
             p0, p1 = self.best_probe(x0), self.best_probe(x1)
+        
         avg_confidence = 0.5*(p0 + (1-p1))
-        predictions = (avg_confidence.detach().cpu().numpy() < 0.5).astype(int)[:, 0]
+        avg_confidence_np = avg_confidence.detach().cpu().numpy()[:, 0]
+        predictions = (avg_confidence_np < 0.5).astype(int)
+        
         acc = (predictions == y_test).mean()
         acc = max(acc, 1 - acc)
-
-        return acc
+        
+        if not return_all_metrics:
+            return acc
+            
+        # Calculate additional metrics
+        precision = precision_score(y_test, predictions)
+        recall = recall_score(y_test, predictions)
+        f1 = f1_score(y_test, predictions)
+        auc = roc_auc_score(y_test, 1 - avg_confidence_np)  # 1 - confidence because we're using < 0.5
+        
+        return acc, precision, recall, f1, auc
     
         
     def train(self):
@@ -159,22 +176,22 @@ class CCS(object):
         
         # Check x and y values
         # Print a few examples to check data
-        print("First 5 x values:", x[:5])
-        print("First 5 y values:", y[:5])
-        print("Shape of x:", x.shape)
-        print("Shape of y:", y.shape)
-        print("Unique y values:", torch.unique(y))
+        # print("First 5 x values:", x[:5])
+        # print("First 5 y values:", y[:5])
+        # print("Shape of x:", x.shape)
+        # print("Shape of y:", y.shape)
+        # print("Unique y values:", torch.unique(y))
         
         # check the distributio of y
-        print("Distribution of y values:", torch.bincount(y.flatten().long()))
+        # print("Distribution of y values:", torch.bincount(y.flatten().long()))
         
         # set up optimizer
-        optimizer = torch.optim.AdamW(self.probe.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        optimizer = torch.optim.AdamW(self.best_probe.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         
         if batch_size == -1:
             batch_size = len(x)
         nbatches = len(x) // batch_size
-        print(len(x), batch_size, nbatches)
+        # print(len(x), batch_size, nbatches)
 
         # Track loss history
         loss_history = []
@@ -192,7 +209,7 @@ class CCS(object):
                 y_batch = y_shuffled[j*batch_size:(j+1)*batch_size]
 
                 # probe
-                p = self.probe(x_batch)
+                p = self.best_probe(x_batch)
                 
                 # check some of the model outputs in a batch
                 # print("Model outputs (probabilities):", p[:5])
@@ -215,8 +232,8 @@ class CCS(object):
 
         # visualize the loss_history
         # if verbose:
-        plt.plot(loss_history)
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title("Training Loss History")
-        plt.show()
+        # plt.plot(loss_history)
+        # plt.xlabel("Epoch")
+        # plt.ylabel("Loss")
+        # plt.title("Training Loss History")
+        # plt.show()
